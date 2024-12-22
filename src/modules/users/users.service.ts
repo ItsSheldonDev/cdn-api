@@ -1,5 +1,5 @@
 // src/modules/users/users.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -27,12 +27,34 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, updateProfileDto: UpdateProfileDto) {
+    // Vérifier si l'utilisateur existe
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
 
     if (!user) {
       throw new NotFoundException('Utilisateur non trouvé');
+    }
+
+    // Si l'email est modifié, vérifier qu'il n'est pas déjà utilisé
+    if (updateProfileDto.email && updateProfileDto.email !== user.email) {
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email: updateProfileDto.email },
+      });
+
+      if (existingUser) {
+        throw new BadRequestException('Cet email est déjà utilisé');
+      }
+
+      // Vérifier si la vérification d'email est requise
+      const settings = await this.prisma.settings.findFirst({
+        where: { id: '1' },
+      });
+
+      if (settings.requireEmailVerification) {
+        // Ici, vous pourriez implémenter la logique d'envoi d'email de vérification
+        // et mettre un flag emailVerified à false
+      }
     }
 
     return this.prisma.user.update({
@@ -46,29 +68,6 @@ export class UsersService {
         createdAt: true,
       },
     });
-  }
-
-  async getQuota(userId: string) {
-    const [settings, userFiles] = await Promise.all([
-      this.prisma.settings.findFirst({
-        where: { id: '1' },
-      }),
-      this.prisma.file.aggregate({
-        where: { userId },
-        _sum: {
-          size: true,
-        },
-      }),
-    ]);
-
-    const usedStorage = userFiles._sum.size || 0;
-    const maxStorage = settings?.maxStoragePerUser || 1024; // 1GB par défaut
-
-    return {
-      used: usedStorage,
-      max: maxStorage * 1024 * 1024, // Conversion en bytes
-      percentage: Math.round((usedStorage / (maxStorage * 1024 * 1024)) * 100),
-    };
   }
 
   async getStats(userId: string) {
@@ -99,6 +98,32 @@ export class UsersService {
         acc[curr.mimeType] = curr._count.mimeType;
         return acc;
       }, {}),
+    };
+  }
+
+  async getQuota(userId: string) {
+    const [settings, userFiles] = await Promise.all([
+      this.prisma.settings.findFirst({
+        where: { id: '1' },
+      }),
+      this.prisma.file.aggregate({
+        where: { userId },
+        _sum: {
+          size: true,
+        },
+      }),
+    ]);
+
+    const usedStorage = userFiles._sum.size || 0;
+    const maxStorage = settings.maxStoragePerUser;
+    const maxStorageBytes = maxStorage * 1024 * 1024; // Conversion en bytes
+
+    return {
+      used: usedStorage,
+      max: maxStorageBytes,
+      available: maxStorageBytes - usedStorage,
+      percentage: Math.round((usedStorage / maxStorageBytes) * 100),
+      maxFileSize: settings.maxFileSize * 1024 * 1024, // Taille max d'upload en bytes
     };
   }
 }
