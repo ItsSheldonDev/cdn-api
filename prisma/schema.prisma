@@ -3,6 +3,10 @@ generator client {
   provider = "prisma-client-js"
 }
 
+generator seed {
+  provider = "prisma-seed"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -22,11 +26,12 @@ model File {
   metadata      Json?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  uploadedBy    User?     @relation(fields: [userId], references: [id])
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId        String?
 
   @@index([userId])
   @@index([shareCode])
+  @@index([expiresAt])
 }
 
 model User {
@@ -35,25 +40,26 @@ model User {
   password         String
   isAdmin          Boolean   @default(false)
   isApproved       Boolean   @default(false)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
   approvalExpires  DateTime?
-  files            File[]
   loginAttempts    Int       @default(0)
   lastLoginAttempt DateTime?
-  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  files            File[]
+
   @@index([email])
+  @@index([isApproved, approvalExpires])
 }
 
 model Settings {
   id                      String    @id @default("1")
-  maxFileSize            Int       @default(100)
-  maxAdminFileSize       Int       @default(10240)
-  allowedFileTypes       String[]
+  maxFileSize            Int       @default(100)       // MB
+  maxAdminFileSize       Int       @default(10240)    // MB
+  allowedFileTypes       String[]  @default(["*"])
   defaultExpiration      String    @default("never")
   approvalRequired       Boolean   @default(true)
-  approvalExpiration     Int       @default(72)
-  maxStoragePerUser     Int       @default(1024)
+  approvalExpiration     Int       @default(72)       // heures
+  maxStoragePerUser     Int       @default(1024)     // MB
   minPasswordLength      Int       @default(8)
   requireEmailVerification Boolean  @default(true)
   maxLoginAttempts      Int       @default(5)
@@ -63,8 +69,10 @@ model Settings {
 model Statistics {
   id             String   @id @default(cuid())
   totalFiles     Int
-  totalSize      Int
+  totalSize      Int      // bytes
   totalDownloads Int
   filesByType    Json
   timestamp      DateTime @default(now())
+
+  @@index([timestamp])
 }
